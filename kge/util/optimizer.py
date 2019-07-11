@@ -40,6 +40,7 @@ class KgeLRScheduler:
             raise ValueError("Invalid LR scheduler options. Could not find '{}' "
                              "in torch.optim.lr_scheduler".format(name))
 
+
 class ConstantLRScheduler(_LRScheduler):
     """Default LR scheduler that does nothing."""
 
