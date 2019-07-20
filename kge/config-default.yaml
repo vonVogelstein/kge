@@ -120,6 +120,9 @@ eval:
   pin_memory: False
   trace_level: example            # example or batch or epoch
 
+entity_pair_ranking:
+  chunk_size: 100                 # value to divide computation of score matrix
+
 ## HYPERPARAMETER SEARCH ###############################################################
 
 search:

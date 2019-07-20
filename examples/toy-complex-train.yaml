@@ -9,3 +9,5 @@ train:
 lookup_embedder.dim: 100
 #lookup_embedder.initialize: normal_
 lookup_embedder.initialize: xavier_uniform_
+train.type: negative_sampling
+train.loss: bce

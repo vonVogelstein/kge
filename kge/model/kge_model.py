@@ -497,3 +497,92 @@ class KgeModel(KgeBase):
             all_subjects = self.get_s_embedder().embed_all()
             po_scores = self._scorer.score_emb(all_subjects, p, o, combine="*po")
         return torch.cat((sp_scores, po_scores), dim=1)
+
+    def score_p_old(self, p):
+        r"""Compute scores for all possible triples for each relation in the
+        given set of relations p
+
+        `p` is a vectors of size :math:`n`, holding the indexes of the relations
+        which determine the triples to score.
+
+        The result is a three way tensor containing the entire score matrix of
+        each relation in p in each frontal slice. I.e., returns an :math:`n\times
+        E\times E` tensor, where :math:`E` is the total number of known entities.
+
+        """
+
+        # TODO: current implementation does not prevent inverse relations model
+        # from being used, because we rely on scores_sp here
+        # But this should be prevented somewhere
+
+        # Initialize scores tensor (3-way: depth, rows, cols)
+        scores = torch.zeros(len(p), self.dataset.num_entities, self.dataset.num_entities)
+
+        # Get embeddings
+        p = self.get_p_embedder().embed(p)
+        all_subjects = self.get_s_embedder().embed_all()
+        if self.get_s_embedder() is self.get_o_embedder():
+            all_objects = all_subjects
+        else:
+            all_objects = self.get_o_embedder().embed_all()
+
+        # Compute all scores
+        for s in range(len(all_subjects)):
+            subjects_emb = all_subjects[s].reshape(-1, 1).t().expand(len(p), -1)
+            scores[:,s,:] = self._scorer.score_emb(subjects_emb, p, all_objects, combine="sp*")
+
+        return scores
+
+    def score_p(self, p):
+        r"""Compute scores matrix of given relation p."""
+
+        # TODO: current implementation does not prevent inverse relations model
+        # from being used, because we rely on scores_sp here
+        # But this should be prevented somewhere
+
+        # Get chunk size
+        chunk_size = self.config.get_default("entity_pair_ranking.chunk_size")
+        num_chunks = int(self.dataset.num_entities / chunk_size)
+        max_k = self.config.get_default("eval.max_k")
+
+        # Initialize scores tensor (3-way: depth, rows, cols)
+        scores = torch.zeros(self.dataset.num_entities, chunk_size)
+
+        # Get subject and relation embeddings
+        s = self.get_s_embedder().embed_all()
+        p = self.get_p_embedder().embed(p)
+        p = p.reshape(-1, 1).t().expand(len(s), -1)
+
+        # Compute score matrix in chunks
+        for chunk in range(num_chunks + 1):
+            start = 0 + (chunk * chunk_size)
+            end = start + chunk_size
+            if end > self.dataset.num_entities:
+                end = self.dataset.num_entities
+            o = torch.Tensor(list(range(start, end)))
+            o = self.get_o_embedder().embed(o)
+
+            # Compute chunk scores
+            chunk_scores = self._scorer.score_emb(s, p, o, combine="sp*")
+
+            # Get top k scores in chunk
+            chunk_scores_1d = chunk_scores.view(1, -1)
+            topk = torch.topk(chunk_scores_1d, k=max_k)
+
+            # Convert topk.indices to 2D
+            # topk.indices is (1, max_k)
+            # indices need to change from 1d in range(num_entities * len(o))
+            # to indices of a matrix of shape (num_entities, len(o))
+
+            # Convert 2d indices to global indices
+            # rows should remain the same, columns should change
+            # the o tensor contains the global position of the columns
+            # so o[local_column] should give you global column
+
+            # Add (topk.scores, global_2d_indices) to global tracking
+
+        # Get top k scores in global tracking, store as global_topk_scores
+        # Get corresponding 2d indices, store as global_topk_indices
+
+        # Return global scores
+        return global_topk_scores, global_topk_indices

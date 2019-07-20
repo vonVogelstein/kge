@@ -119,8 +119,8 @@ class Dataset:
 
     def index_1toN(self, what: str, key: str):
         """Return an index for the triples in what (''train'', ''valid'', ''test'')
-from the specified constituents (''sp'' or ''po'') to the indexes of the
-remaining constituent (''o'' or ''s'', respectively.)
+        from the specified constituents (''sp'' or ''po'') to the indexes of the
+        remaining constituent (''o'' or ''s'', respectively.)
 
         The index maps from `tuple' to `torch.LongTensor`.
 
@@ -169,4 +169,50 @@ remaining constituent (''o'' or ''s'', respectively.)
             values.append(value[i].item())
         for key in result:
             result[key] = torch.LongTensor(sorted(result[key]))
+        return result
+
+    def index_MtoN(self, what: str):
+        """Return an index for the triples in what (''train'', ''valid'', ''test'')
+        from the relations (''p'') to the indexes of the its (''so'') tuples.
+
+        The index is cached in the provided dataset under name ''what_p''. If
+        this index is already present, does not recompute it.
+
+        """
+        if what == "train":
+            triples = self.train
+        elif what == "valid":
+            triples = self.valid
+        elif what == "test":
+            triples = self.test
+        else:
+            raise ValueError()
+
+        key_column = [1]
+        value_columns = [0, 2]
+
+        name = what + "_p"
+        if not self.indexes.get(name):
+            index = Dataset._create_index_MtoN(
+                triples[:, key_column], triples[:, value_columns]
+            )
+            self.indexes[name] = index
+            self.config.log(
+                "{} distinct {} pairs in {}".format(len(index), "p", what), prefix="  "
+            )
+
+        return self.indexes.get(name)
+
+    def _create_index_MtoN(key, value) -> dict:
+        result = {}
+        for i in range(len(key)):
+            k = key[i].item()
+            values = result.get(k)
+            if values is None:
+                values = []
+                result[k] = values
+            v = (value[i, 0].item(), value[i, 1].item())
+            values.append(v)
+        for key in result:
+            result[key] = torch.LongTensor(result[key]).int()
         return result
