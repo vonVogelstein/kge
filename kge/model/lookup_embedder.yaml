@@ -9,7 +9,7 @@ lookup_embedder:
   initialize: normal_         # xavier_uniform_, xavier_normal_, uniform_, normal_
   initialize_args:            # this is default if specific option below are not used
     +++: +++
-  normal_args: 
+  normal_args:                # specific options, useful for search jobs
     mean: 0.0
     std: 0.1
   uniform_args:
