@@ -20,10 +20,17 @@ class LookupEmbedder(KgeEmbedder):
         self.embeddings = torch.nn.Embedding(
             self.vocab_size, self.dim, sparse=self.sparse
         )
+        # initialize weights
+        init_ = self.get_option("initialize")
+
+        try:
+            init_args = self.get_option(init_ + "args")
+        except KeyError:
+            init_args = self.get_option("initialize_args")
         self.initialize(
             self.embeddings.weight.data,
-            self.get_option("initialize"),
-            self.get_option("initialize_args"),
+            init_,
+            init_args,
         )
 
     def _embed(self, embeddings):
