@@ -168,6 +168,7 @@ eval:
   num_workers: 0
   pin_memory: False
   trace_level: example            # example or batch or epoch
+  dump_scores: False              # dump the scores into a text file 
 
   # Metrics are always computed over the entire evaluation data. Optionally,
   # certain more specific metric can be computed in addition.

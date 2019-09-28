@@ -327,6 +327,12 @@ class EntityRankingJob(EvaluationJob):
             scores_po = scores_po - labels_po
         o_ranks = self._get_rank(scores_sp, o)
         s_ranks = self._get_rank(scores_po, s)
+        if self.config.get('eval.dump_scores') and labels is not None:
+                import pandas
+                pandas.DataFrame(scores_sp.cpu().numpy()).to_csv(self.config.folder + '/scores_sp.csv', header=False, index=False)
+                pandas.DataFrame(scores_po.cpu().numpy()).to_csv(self.config.folder + '/scores_po.csv', header=False, index=False)
+                pandas.DataFrame(o.cpu().numpy()).to_csv(self.config.folder + '/true_o.csv', header=False, index=False)
+                pandas.DataFrame(s.cpu().numpy()).to_csv(self.config.folder + '/true_s.csv', header=False, index=False)
         return s_ranks, o_ranks, scores_sp, scores_po
 
     def _get_rank(self, scores, answers):
@@ -345,6 +351,23 @@ class EntityRankingJob(EvaluationJob):
         ranks_equal = torch.sum((scores == true_scores.view(-1, 1)).long(), dim=1)
         ranks = ranks_greater + ranks_equal // 2
         return ranks
+
+   # working version
+
+
+#    def _get_rank(self, scores, answers):
+#        # Get scores of answer given by each triple
+#        # Add small number to all scores to make the rank of the true worst in case of tie
+#        # Get tensor of 1s for each score which is higher than the true answer score.
+#        # Add 1s in each row to get the rank of the corresponding row.
+#        # Fix for the add small number fix we substract 1 from each rank with
+#        # the lowest possible.
+#        true_scores = scores[range(answers.size(0)), answers.long()]
+#        scores = scores + 1e-40
+#        ranks = torch.sum((scores > true_scores.view(-1, 1)).long(), dim=1)
+#        ranks = ranks - (ranks == self.dataset.num_entities).long()
+#        return ranks
+
 
     def _compute_metrics(self, rank_hist, suffix=""):
         metrics = {}

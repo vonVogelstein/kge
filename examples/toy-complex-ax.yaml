@@ -4,8 +4,11 @@ train.optimizer: Adagrad
 train.loss: soft_margin
 model: complex
 random_seed.torch: 1
+eval.dump_scores: True
+eval.batch_size: 1000
 
 train.max_epochs: 10
+
 
 search.type: ax
 ax_search:
