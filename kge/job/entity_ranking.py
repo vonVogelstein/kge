@@ -348,26 +348,27 @@ class EntityRankingJob(EvaluationJob):
         true_scores = scores[range(answers.size(0)), answers.long()]
         ranks_greater = torch.sum((scores > true_scores.view(-1, 1)).long(), dim=1)
         # each element of ranks_equal is at 1 (since the true answer is in scores)
-        ranks_equal = torch.sum((scores == true_scores.view(-1, 1)).long(), dim=1)
+        ranks_equal = scores == true_scores.view(-1, 1)
+        # yields True if scores are NaN
+        scores_nan = scores != scores 
+        ranks_equal = torch.sum((scores_nan | ranks_equal).long(), dim=1) 
         ranks = ranks_greater + ranks_equal // 2
         return ranks
 
    # working version
 
-
-#    def _get_rank(self, scores, answers):
-#        # Get scores of answer given by each triple
-#        # Add small number to all scores to make the rank of the true worst in case of tie
-#        # Get tensor of 1s for each score which is higher than the true answer score.
-#        # Add 1s in each row to get the rank of the corresponding row.
-#        # Fix for the add small number fix we substract 1 from each rank with
-#        # the lowest possible.
-#        true_scores = scores[range(answers.size(0)), answers.long()]
-#        scores = scores + 1e-40
-#        ranks = torch.sum((scores > true_scores.view(-1, 1)).long(), dim=1)
-#        ranks = ranks - (ranks == self.dataset.num_entities).long()
-#        return ranks
-
+    def _get_rank_(self, scores, answers):
+        # Get scores of answer given by each triple
+        # Add small number to all scores to make the rank of the true worst in case of tie
+        # Get tensor of 1s for each score which is higher than the true answer score.
+        # Add 1s in each row to get the rank of the corresponding row.
+        # Fix for the add small number fix we substract 1 from each rank with
+        # the lowest possible.
+        true_scores = scores[range(answers.size(0)), answers.long()]
+        scores = scores + 1e-40
+        ranks = torch.sum((scores > true_scores.view(-1, 1)).long(), dim=1)
+        ranks = ranks - (ranks == self.dataset.num_entities).long()
+        return ranks
 
     def _compute_metrics(self, rank_hist, suffix=""):
         metrics = {}
