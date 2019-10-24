@@ -109,10 +109,13 @@ class LookupEmbedder(KgeEmbedder):
                     ]
                 return result
             else:
-                return super().penalty(**kwargs) + [
-                    self.get_option("regularize_args.weight")
-                    * self.embeddings.weight.norm(p=1)
-                ]
+                if kwargs["subbatch_index"] == 0:
+                    return super().penalty(**kwargs) + [
+                        self.get_option("regularize_args.weight")
+                        * self.embeddings.weight.norm(p=1)
+                    ]
+                else:
+                    return super().penalty(**kwargs)
         elif self.regularize == "l2":
             if self.get_option("regularize_args.weighted"):
                 result = super().penalty(**kwargs)
@@ -129,11 +132,17 @@ class LookupEmbedder(KgeEmbedder):
                     ]
                 return result
             else:
-                return super().penalty(**kwargs) + [
-                    self.get_option("regularize_args.weight")
-                    * self.embeddings.weight.norm(p=2) ** 2
-                ]
+                if kwargs["subbatch_index"] == 0:
+                    return super().penalty(**kwargs) + [
+                        self.get_option("regularize_args.weight")
+                        * self.embeddings.weight.norm(p=2) ** 2
+                    ]
+                else:
+                    return super().penalty(**kwargs)
         elif self.regularize == "l3":
+            # As in CP-N3 paper, Eq. (4): Timothée Lacroix, Nicolas Usunier, Guillaume
+            # Obozinski. Canonical Tensor Decomposition for Knowledge Base Completion.
+            # ICML 2018. https://arxiv.org/abs/1806.07297
             if self.get_option("regularize_args.weighted"):
                 result = super().penalty(**kwargs)
                 if "batch" in kwargs and "triples" in kwargs["batch"]:
@@ -151,12 +160,12 @@ class LookupEmbedder(KgeEmbedder):
                     ]
                 return result
             else:
-                # As in CP-N3 paper, Eq. (4): Timothée Lacroix, Nicolas Usunier, Guillaume
-                # Obozinski. Canonical Tensor Decomposition for Knowledge Base Completion.
-                # ICML 2018. https://arxiv.org/abs/1806.07297
-                return super().penalty(**kwargs) + [
-                    self.get_option("regularize_args.weight")
-                    * self.embeddings.weight.norm(p=3) ** 3
-                ]
+                if kwargs["subbatch_index"] == 0:
+                    return super().penalty(**kwargs) + [
+                        self.get_option("regularize_args.weight")
+                        * self.embeddings.weight.norm(p=3) ** 3
+                    ]
+                else:
+                    return super().penalty(**kwargs)
         else:
             raise ValueError("unknown penalty")

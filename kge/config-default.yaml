@@ -77,6 +77,11 @@ train:
   # Batch size used for training.
   batch_size: 100
 
+  # Number of subbatches to split batches into. Can be used to simulate large
+  # batch sizes that do not fit into GPU memory. Their computation is split into
+  # num_subbatches chunks and the gradients are accumulated.
+  num_subbatches: 1
+
   # Number of workers used to construct batches. Leave at 0 for default.
   num_workers: 0
 

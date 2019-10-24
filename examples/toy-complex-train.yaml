@@ -5,12 +5,20 @@ train:
   optimizer: Adagrad
   optimizer_args:
     lr: 0.2
-    weight_decay: 0.4e-7
+#    weight_decay: 0.4e-7
+  batch_size: 100
+#  num_subbatches: 1
+  num_subbatches: 2
+  max_epochs: 1
+valid.every: 1
 lookup_embedder.dim: 100
 train.lr_scheduler: ReduceLROnPlateau
-train.lr_scheduler_args: 
+train.lr_scheduler_args:
   mode: max
   patience: 4
+train.loss: kl
+#trian.type: KvsAll
+train.type: 1vsAll
 
 valid.filter_with_test: True
 
@@ -29,3 +37,15 @@ lookup_embedder.initialize_args:
   #   gain: 1.0
   # xavier_uniform_:
   #   gain: 1.0
+
+lookup_embedder:
+#  regularize: ''
+  regularize: 'l2'
+  regularize_args:
+    weight: 0.0000001
+    weighted: False
+#    weighted: True
+
+random_seed.torch: 0
+random_seed.python: 0
+random_seed.numpy: 0
