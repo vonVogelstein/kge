@@ -40,6 +40,11 @@ class TrainingJob(Job):
             config, self.optimizer
         )
         self.loss = KgeLoss.create(config)
+        if self.config.get("train.max_subbatch_size") > 0:
+            self.config.set(
+                "train.num_subbatches",
+                max(1, self.config.get("train.batch_size") // self.config.get("train.max_subbatch_size"))
+            )
         self.batch_size: int = config.get("train.batch_size") // self.config.get("train.num_subbatches")
         self.device: str = self.config.get("job.device")
         valid_conf = config.clone()

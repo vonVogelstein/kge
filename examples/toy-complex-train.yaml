@@ -1,17 +1,21 @@
 job.type: train
 dataset.name: toy
-model: complex
+#dataset.name: fb15k
+model: rescal
+#model: reciprocal_relations_model
+#reciprocal_relations_model.base_model.type: rescal
 train:
   optimizer: Adagrad
   optimizer_args:
     lr: 0.2
 #    weight_decay: 0.4e-7
-  batch_size: 100
-#  num_subbatches: 1
-  num_subbatches: 2
+#  batch_size: 256
+  batch_size: 32
+#  num_subbatches: 128
+  max_subbatch_size: 16
   max_epochs: 1
 valid.every: 1
-lookup_embedder.dim: 100
+lookup_embedder.dim: 512
 train.lr_scheduler: ReduceLROnPlateau
 train.lr_scheduler_args:
   mode: max
@@ -45,6 +49,7 @@ lookup_embedder:
     weight: 0.0000001
     weighted: False
 #    weighted: True
+  dropout: 0.5
 
 random_seed.torch: 0
 random_seed.python: 0

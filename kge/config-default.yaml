@@ -82,6 +82,13 @@ train:
   # num_subbatches chunks and the gradients are accumulated.
   num_subbatches: 1
 
+  # Maximum subbatch size. Can be used similar to num_subbatches to simulate large
+  # batch sizes that do not fit into GPU memory. Their computation is split into
+  # max(1, batch_size/max_subbatch_size) chunks and the gradients are accumulated.
+  # Is used to compute num_subbatches dynamically and is mostly useful for hyper-
+  # parameter search.
+  max_subbatch_size: -1
+
   # Number of workers used to construct batches. Leave at 0 for default.
   num_workers: 0
 
