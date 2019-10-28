@@ -339,7 +339,7 @@ class TrainingJob(Job):
             batch_forward_time += time.time()
 
             # determine full cost
-            batch_cost_value = batch_cost_value + loss_value * actual_batch_size / self.config.get("train.batch_size") + penalty_value
+            batch_cost_value = loss_value * actual_batch_size / self.config.get("train.batch_size") + penalty_value
             forward_time += batch_forward_time
 
             # visualize graph
@@ -367,16 +367,17 @@ class TrainingJob(Job):
                         )
                     )
 
+
             # backward pass
+            batch_backward_time = -time.time()
+            batch_cost_value.backward()
+            batch_backward_time += time.time()
+            backward_time += batch_backward_time
+
             if (
                 subbatch_index == self.config.get("train.num_subbatches") - 1 or
                 batch_index == len(self.loader) - 1
             ):
-
-                batch_backward_time = -time.time()
-                batch_cost_value.backward()
-                batch_backward_time += time.time()
-                backward_time += batch_backward_time
 
                 # print memory stats
                 if self.epoch == 1 and batch_index == self.config.get("train.num_subbatches") - 1:
@@ -561,7 +562,7 @@ class TrainingJobKvsAll(TrainingJob):
         self.loader = torch.utils.data.DataLoader(
             range(len(train_sp) + len(train_po)),
             collate_fn=self._get_collate_fun(),
-            shuffle=True,
+            shuffle=False,
             batch_size=self.batch_size,
             num_workers=self.config.get("train.num_workers"),
             pin_memory=self.config.get("train.pin_memory"),
@@ -707,7 +708,7 @@ class TrainingJobNegativeSampling(TrainingJob):
         self.loader = torch.utils.data.DataLoader(
             range(self.dataset.train.size(0)),
             collate_fn=self._get_collate_fun(),
-            shuffle=True,
+            shuffle=False,
             batch_size=self.batch_size,
             num_workers=self.config.get("train.num_workers"),
             pin_memory=self.config.get("train.pin_memory"),
@@ -912,7 +913,7 @@ class TrainingJob1vsAll(TrainingJob):
         self.loader = torch.utils.data.DataLoader(
             range(self.dataset.train.size(0)),
             collate_fn=lambda batch: {"triples": self.dataset.train[batch, :].long()},
-            shuffle=True,
+            shuffle=False,
             batch_size=self.batch_size,
             num_workers=self.config.get("train.num_workers"),
             pin_memory=self.config.get("train.pin_memory"),
