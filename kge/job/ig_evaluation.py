@@ -96,6 +96,8 @@ class IgEvaluationJob(EvaluationJob):
         sorting_etc_time = 0
         finding_time = 0
 
+        # device_printed = False
+
         # indexes_to_be_viewed = [18, 35, 78]
         for batch_index, batch in enumerate(self.loader):
             triples_class_batch = batch["triples_class"]
@@ -130,6 +132,8 @@ class IgEvaluationJob(EvaluationJob):
                 scores = torch.exp(scores)
                 probabilities = scores / torch.sum(scores, dim=1).view(-1, 1)
 
+                probabilities = probabilities.to("cpu")
+
                 indices_no_unknown = (triples_class[:, P] != (self.dataset.num_relations() - 1)).nonzero().view(-1)
 
                 # probabilities_no_unknown = probabilities[indices_no_unknown]
@@ -156,7 +160,7 @@ class IgEvaluationJob(EvaluationJob):
                 """
 
                 # max_indices = max_indices.type(torch.IntTensor)
-                true_predicates = triples_class[:, P].reshape(-1, 1)
+                true_predicates = triples_class[:, P].reshape(-1, 1).to("cpu")
                 true_predicates = true_predicates.repeat(1, max(ks))
 
 

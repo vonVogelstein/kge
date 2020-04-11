@@ -690,7 +690,7 @@ class TrainingJobKvsAll(TrainingJob):
         batch_size = len(queries_batch)
         label_coords_batch = batch["label_coords"].to(self.device)
         query_type_indexes_batch = batch["query_type_indexes"]
-        label_coords_counts_batch = batch["label_coords_counts"]
+        label_coords_counts_batch = batch["label_coords_counts"].to(self.device)
 
 
         examples_for_query_type = {}
