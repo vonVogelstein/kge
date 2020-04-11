@@ -41,6 +41,7 @@ class KgeLoss:
                 "ce",
                 "kl",
                 "soft_margin",
+                "poisson"
             ],
         )
         if config.get("train.loss") == "bce":
@@ -81,6 +82,8 @@ class KgeLoss:
             return MarginRankingKgeLoss(config, margin=margin)
         elif config.get("train.loss") == "soft_margin":
             return SoftMarginKgeLoss(config)
+        elif config.get("train.loss") == "poisson":
+            return PoissonLoss(config)
         else:
             raise ValueError(
                 "invalid value train.loss={}".format(config.get("train.loss"))
@@ -259,3 +262,11 @@ class MarginRankingKgeLoss(KgeLoss):
             )
         else:
             raise ValueError("train.type for margin ranking.")
+
+
+class PoissonLoss(KgeLoss):
+    def __init__(self, config):
+        super().__init__(config)
+
+    def __call__(self, scores, counts, **kwargs):
+        return torch.sum(torch.exp(scores) - counts * scores)

@@ -299,7 +299,7 @@ negative_sampling:
 # validation when training (unless overridden, see below). Right now, evaluation
 # jobs compute a fixed set of metrics: MRR, HITS@k.
 eval:
-  # Split used for evaluation (specified under 'dataset.files').
+  # Split used for evaluation (specified under 'dataset.files').  # TODO: Should this not say that filename etc. are specified under dataset.files?
   split: valid
 
   # Splits used to filter for filtered metrics. The split using for evaluation

@@ -416,7 +416,6 @@ class TrainingJob(Job):
                 end="",
                 flush=True,
             )
-
             # update times
             prepare_time += batch_result.prepare_time
             forward_time += batch_forward_time
@@ -554,6 +553,13 @@ class TrainingJobKvsAll(TrainingJob):
         #' of that type in the list of all examples
         self.query_end_index = []
 
+        # TODO: Must search for more reasonable place for this in config, generally need to see
+        # TODO: how to handle the new "tasks" in the config file, also because many options
+        # TODO: are not available for these new tasks
+        self.task = self.config.get("job.task")
+        if self.task == "ig_count":
+            self.counts = self.dataset.index(f"{self.train_split}_triples_to_counts")  # self.train_split is just the word train
+
         # construct relevant data structures
         self.num_examples = 0
         for query_type in self.query_types:
@@ -613,6 +619,7 @@ class TrainingJobKvsAll(TrainingJob):
             queries_batch = torch.zeros([len(batch), 2], dtype=torch.long)
             query_type_indexes_batch = torch.zeros([len(batch)], dtype=torch.long)
             label_coords_batch = torch.zeros([num_ones, 2], dtype=torch.int)
+
             triples_batch = torch.zeros([num_ones, 3], dtype=torch.long)
             current_index = 0
             for batch_index, example_index in enumerate(batch):
@@ -653,7 +660,17 @@ class TrainingJobKvsAll(TrainingJob):
                 triples_batch[
                     current_index : (current_index + size), target_col
                 ] = labels[start:end]
+
                 current_index += size
+
+            if self.task == "ig_count":
+                triples_batch_tuples = [tuple([pos.item() for pos in triple]) for triple in triples_batch]
+                label_coords_counts_batch = torch.tensor(
+                    [int(self.counts[triple]) for triple in triples_batch_tuples], dtype=torch.int)
+                # print(label_coords_counts_batch)
+            else:
+                label_coords_counts_batch = 1.0
+
 
             # all done
             return {
@@ -661,6 +678,7 @@ class TrainingJobKvsAll(TrainingJob):
                 "label_coords": label_coords_batch,
                 "query_type_indexes": query_type_indexes_batch,
                 "triples": triples_batch,
+                "label_coords_counts": label_coords_counts_batch
             }
 
         return collate
@@ -672,6 +690,8 @@ class TrainingJobKvsAll(TrainingJob):
         batch_size = len(queries_batch)
         label_coords_batch = batch["label_coords"].to(self.device)
         query_type_indexes_batch = batch["query_type_indexes"]
+        label_coords_counts_batch = batch["label_coords_counts"]
+
 
         examples_for_query_type = {}
         for query_type_index, query_type in enumerate(self.query_types):
@@ -687,7 +707,13 @@ class TrainingJobKvsAll(TrainingJob):
             max(self.dataset.num_entities(), self.dataset.num_relations()),
             label_coords_batch,
             self.device,
+            label_coords_counts_batch
         ).to_dense()
+
+        # print("ABCDEFGH\n")
+        # print(labels_batch)
+        # print("\n")
+
         labels_for_query_type = {}
         for query_type, examples in examples_for_query_type.items():
             if query_type == "s_o":

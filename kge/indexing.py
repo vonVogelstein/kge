@@ -4,19 +4,58 @@ import numba
 import numpy as np
 
 
+def triples_to_counts(dataset, split):
+    triples = dataset.split(f"{split}.global.triples")
+    triple_index_count_map = dataset.load_map(f"{split}.global.counts", as_list=True)
+    triple_tuple_list = [tuple([pos.item() for pos in triple]) for triple in triples]
+    triple_count_map = dict(zip(triple_tuple_list, triple_index_count_map))
+
+    dataset._indexes[f"{split}_triples_to_counts"] = triple_count_map
+
+
+def triples_ig_level(dataset, split, type_):
+    triples = dataset.split(f"{split}.ig.triples_{type_}")
+    triples_to_igs = dataset.load_map(f"{split}.ig.triples_to_igs", as_list=True)
+
+    ig_to_triples = _group_by(triples_to_igs, triples)
+
+    dataset._indexes[f"{split}_triples_{type_}_grouped_ig"] = ig_to_triples
+
+
+def instances_ig_level(dataset, split):
+    instances = dataset.load_map(f"{split}.ig.instances_to_igs", as_list=False)
+
+    ig_to_instances = _group_by(
+        list(instances.values()), list(instances.keys())
+    )
+
+    dataset._indexes[f"{split}_instances_grouped_ig"] = ig_to_instances
+
+
 def _group_by(keys, values) -> dict:
     """Group values by keys.
 
-    :param keys: list of keys
+    :param keys: list of keys  # TODO: This cannot even be a list as of original code
     :param values: list of values
     A key value pair i is defined by (key_list[i], value_list[i]).
     :return: OrderedDict where key value pairs have been grouped by key.
 
      """
+    if not isinstance(keys, list):
+        keys = keys.tolist()
+    if not isinstance(values, list):
+        values = values.tolist()
+
     result = defaultdict(list)
-    for key, value in zip(keys.tolist(), values.tolist()):
-        result[tuple(key)].append(value)
+    for key, value in zip(keys, values):
+        if isinstance(key, str):  # covers all cases coming from maps where key does not have to/ cannot be made into tuple
+            result[key].append(value)
+        else:
+            result[tuple(key)].append(value)
+
     for key, value in result.items():
+        if isinstance(value[0], str):  # needed for grouping of maps
+            value = [int(elem) for elem in value]
         result[key] = torch.IntTensor(sorted(value))
     return OrderedDict(result)
 
@@ -51,7 +90,8 @@ def index_KvsAll(dataset: "Dataset", split: str, key: str):
 
     name = split + "_" + key + "_to_" + value
     if not dataset._indexes.get(name):
-        triples = dataset.split(split)
+        # triples = dataset.split(split)
+        triples = dataset.split(f"{split}.global.triples")  # TODO: Definitely need to change this to something more reasonable
         dataset._indexes[name] = _group_by(
             triples[:, key_cols], triples[:, value_column]
         )
@@ -221,7 +261,8 @@ def _invert_ids(dataset, obj: str):
 
 
 def create_default_index_functions(dataset: "Dataset"):
-    for split in dataset.files_of_type("triples"):
+    # for split in dataset.files_of_type("triples"):
+    for split in ["train", "valid", "test"]:  # TODO: probably have to change this back
         for key, value in [("sp", "o"), ("po", "s"), ("so", "p")]:
             # self assignment needed to capture the loop var
             dataset.index_functions[f"{split}_{key}_to_{value}"] = IndexWrapper(
@@ -235,6 +276,33 @@ def create_default_index_functions(dataset: "Dataset"):
         dataset.index_functions[f"{obj}_id_to_index"] = IndexWrapper(
             _invert_ids, obj=obj
         )
+
+
+def create_task_specific_index_functions(dataset: "Dataset"):
+    if dataset.config.get("job.task") == "ig_count":
+        dataset.index_functions["train_triples_to_counts"] = IndexWrapper(
+            triples_to_counts, split="train"
+        )
+
+        for split in ["train", "valid", "test"]:
+            for type_ in ["instance", "class"]:
+                dataset.index_functions[f"{split}_triples_{type_}_grouped_ig"] = IndexWrapper(
+                    triples_ig_level, split=split, type_=type_
+                )
+
+        for split in ["train", "valid", "test"]:
+            dataset.index_functions[f"{split}_instances_grouped_ig"] = IndexWrapper(
+                instances_ig_level, split=split
+            )
+
+        # TODO: See if any more index functions are needed for ig_count (e.g. for evaluation)
+        # TODO: Need at least the triples (inst, pred, inst) per image or similar and also entities per ig
+        # TODO:
+
+    else:
+        # TODO: See which other tasks are allowed/ relevant and add them as options
+        # raise NotImplementedError
+        1+1
 
 
 @numba.njit

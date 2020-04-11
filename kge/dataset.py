@@ -10,7 +10,7 @@ import inspect
 
 from kge import Config, Configurable
 import kge.indexing
-from kge.indexing import create_default_index_functions
+from kge.indexing import create_default_index_functions, create_task_specific_index_functions
 from kge.misc import kge_base_dir
 
 from typing import Dict, List, Any, Callable, Union, Optional
@@ -39,18 +39,18 @@ class Dataset(Configurable):
 
         # read the number of entities and relations from the config, if present
         try:
-            self._num_entities: Int = config.get("dataset.num_entities")
+            self._num_entities: int = config.get("dataset.num_entities")
             if self._num_entities < 0:
                 self._num_entities = None
         except KeyError:
-            self._num_entities: Int = None
+            self._num_entities: int = None
 
         try:
-            self._num_relations: Int = config.get("dataset.num_relations")
+            self._num_relations: int = config.get("dataset.num_relations")
             if self._num_relations < 0:
                 self._num_relations = None
         except KeyError:
-            self._num_relations: Int = None
+            self._num_relations: int = None
 
         #: split-name to (n,3) int32 tensor
         self._triples: Dict[str, Tensor] = {}
@@ -67,10 +67,13 @@ class Dataset(Configurable):
         self.index_functions: Dict[str, Callable] = {}
         create_default_index_functions(self)
 
+        create_task_specific_index_functions(self)
+
+
     ## LOADING ##########################################################################
 
     @staticmethod
-    def load(config: Config, preload_data=True):
+    def load(config: Config, preload_data=False):  # TODO: change back to True once preloading is correct again
         """Loads a dataset.
 
         If preload_data is set, loads entity and relation maps as well as all splits.
@@ -84,11 +87,13 @@ class Dataset(Configurable):
             config.load(os.path.join(folder, "dataset.yaml"))
 
         dataset = Dataset(config, folder)
+        """
         if preload_data:
             dataset.entity_ids()
             dataset.relation_ids()
             for split in ["train", "valid", "test"]:
                 dataset.split(split)
+        """
         return dataset
 
     @staticmethod
@@ -449,13 +454,14 @@ NOT RECOMMENDED: You can update the timestamp of all cached files using:
                 if index is not None:
                     self._indexes[key] = index
                     # call index function solely to print log messages. It's
-                    # expected to note recompute the index (which we just loaded)
+                    # expected to not recompute the index (which we just loaded)
                     if key in self.index_functions:
                         self.index_functions[key](self)
 
                     return self._indexes[key]
 
             self.index_functions[key](self)
+
             if use_pickle:
                 Dataset._pickle_dump_atomic(self._indexes[key], pickle_filename)
 

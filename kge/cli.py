@@ -141,7 +141,7 @@ def main():
     parser = create_parser(config)
     args, unknown_args = parser.parse_known_args()
 
-    # If there where unknown args, add them to the parser and reparse. The correctness
+    # If there were unknown args, add them to the parser and reparse. The correctness
     # of these arguments will be checked later.
     if len(unknown_args) > 0:
         parser = create_parser(
@@ -171,7 +171,7 @@ def main():
             print("WARNING: No configuration specified; using " + args.config)
 
         print("Loading configuration {}...".format(args.config))
-        config.load(args.config)
+        config.load(args.config, create=True)  # TODO: Change back to False (default) once experimental phase over
 
     # resume command
     if args.command == "resume":
