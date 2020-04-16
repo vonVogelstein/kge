@@ -104,6 +104,8 @@ class TrainingJob(Job):
             return TrainingJobNegativeSampling(config, dataset, parent_job)
         elif config.get("train.type") == "1vsAll":
             return TrainingJob1vsAll(config, dataset, parent_job)
+        elif config.get("train.type") == "BasicIG":
+            return TrainingJobBasicIG(config, dataset, parent_job)
         else:
             # perhaps TODO: try class with specified name -> extensibility
             raise ValueError("train.type")
@@ -710,10 +712,6 @@ class TrainingJobKvsAll(TrainingJob):
             label_coords_counts_batch
         ).to_dense()
 
-        # print("ABCDEFGH\n")
-        # print(labels_batch)
-        # print("\n")
-
         labels_for_query_type = {}
         for query_type, examples in examples_for_query_type.items():
             if query_type == "s_o":
@@ -757,7 +755,7 @@ class TrainingJobKvsAll(TrainingJob):
                 loss_value = (
                     self.loss(scores, labels_for_query_type[query_type]) / batch_size
                 )
-                loss_value_total = loss_value.item()
+                loss_value_total += loss_value.item()
                 forward_time += time.time()
                 backward_time -= time.time()
                 loss_value.backward()
@@ -1079,4 +1077,336 @@ class TrainingJob1vsAll(TrainingJob):
         # all done
         return TrainingJob._ProcessBatchResult(
             loss_value, batch_size, prepare_time, forward_time, backward_time
+        )
+
+
+
+class TrainingJobBasicIG(TrainingJob):
+    """
+    Implements the most simple IG training, treating all instances of one class in an IG as
+    one instance of that class.
+    Implementation is only pseudo-code like for now as to be able to reason better about
+    the way "preprocessing_ig.py" should function/ what it should output.
+    Maybe I will also have to adjust the dataset class too much so that it becomes easier to
+    program a new class
+    """
+    def __init__(self, config, dataset, parent_job=None):
+        super().__init__(config, dataset, parent_job)
+        self.is_prepared = False
+        # TODO: Here I can add some processing of options, e.g. what kind of sampling, training strategy etc.
+        # TODO: Any required standard stuff should be in here now
+        config.log(
+            "Initializing Basic IG training job ..."
+        )
+        self.type_str = "Basic_IG"
+
+        self.label_smoothing = config.check_range(
+            "KvsAll.label_smoothing", float("-inf"), 1.0, max_inclusive=False
+        )
+        if self.label_smoothing < 0:
+            if config.get("train.auto_correct"):
+                config.log(
+                    "Setting label_smoothing to 0, "
+                    "was set to {}.".format(self.label_smoothing)
+                )
+                self.label_smoothing = 0
+            else:
+                raise Exception(
+                    "Label_smoothing was set to {}, "
+                    "should be at least 0.".format(self.label_smoothing)
+                )
+        elif self.label_smoothing > 0 and self.label_smoothing <= (
+                1.0 / dataset.num_entities()
+        ):
+            if config.get("train.auto_correct"):
+                # just to be sure it's used correctly
+                config.log(
+                    "Setting label_smoothing to 1/num_entities = {}, "
+                    "was set to {}.".format(
+                        1.0 / dataset.num_entities(), self.label_smoothing
+                    )
+                )
+                self.label_smoothing = 1.0 / dataset.num_entities()
+            else:
+                raise Exception(
+                    "Label_smoothing was set to {}, "
+                    "should be at least {}.".format(
+                        self.label_smoothing, 1.0 / dataset.num_entities()
+                    )
+                )
+
+        if self.__class__ == TrainingJobBasicIG:
+            for f in Job.job_created_hooks:
+                f(self)
+
+    def _prepare(self):
+        """Construct dataloader"""
+
+        if self.is_prepared:
+            return
+
+        from kge.indexing import index_KvsAll_to_torch
+
+        # determine enabled query types
+        self.query_types = [
+            key
+            for key, enabled in self.config.get("KvsAll.query_types").items()
+            if enabled
+        ]
+
+        # for each query type: list of queries
+        self.queries = {}
+
+        # for each query type: list of all labels (concatenated across queries)
+        self.labels = {}
+
+        # for each query type: list of starting offset of labels in self.labels. The
+        # labels for the i-th query of query_type are in labels[query_type] in range
+        # label_offsets[query_type][i]:label_offsets[query_type][i+1]
+        self.label_offsets = {}
+
+        # for each query type (ordered as in self.query_types), index of last example
+        # of that type in the list of all examples
+        self.query_end_index = defaultdict(list)
+
+        # self.num_igs = 0
+        for query_type in self.query_types:
+            index_type = (
+                "sp_to_o"
+                if query_type == "sp_"
+                else ("so_to_p" if query_type == "s_o" else "po_to_s")
+            )
+            index = self.dataset.index(f"{self.train_split}_{index_type}")
+            self.queries[query_type] = {}
+            self.labels[query_type] = {}
+            self.label_offsets[query_type] = {}
+            for ig, index_ig in index.items():
+                # Convert indexes to pytorch tensors (as described above).
+                (
+                    self.queries[query_type][ig],
+                    self.labels[query_type][ig],
+                    self.label_offsets[query_type][ig],
+                ) = index_KvsAll_to_torch(index_ig)
+                self.query_end_index[ig].append(len(self.queries[query_type][ig]))
+
+                """
+                if ig == "3" or ig == 3:
+                    print("\nChecking output of prepare for an IG (3):")
+                    print(f"query type: {query_type}")
+                    print("queries:")
+                    print(self.queries[query_type][ig].size())
+                    print(self.queries[query_type][ig])
+                    print("labels:")
+                    print(self.labels[query_type][ig].size())
+                    print(self.labels[query_type][ig])
+                    print("label_offsets:")
+                    print(self.label_offsets[query_type][ig].size())
+                    print(self.label_offsets[query_type][ig])
+                """
+        self.entities = self.dataset.index(f"{self.train_split}_classes_per_ig")
+        self.igs = list(self.entities.keys())
+        self.num_examples = len(self.igs)  # TODO: should rather be the number of triples, not of igs
+        self.loader = torch.utils.data.DataLoader(
+            range(len(self.igs)),  # means we iterate over all igs
+            collate_fn=self._get_collate_fun(),
+            shuffle=True,
+            batch_size=self.batch_size,
+            num_workers=self.config.get("train.num_workers"),
+            pin_memory=self.config.get("train.pin_memory"),
+        )
+
+        self.is_prepared = True
+
+    def _get_collate_fun(self):
+        # create the collate function
+        def collate(batch):
+            """For a batch of size n igs with n_i triples for ig_i, returns a tuple of:
+
+            This is mostly like KvsAll but probably a bit simpler, for every subject-object combination I must
+            predict a score for every relation and then SoftMax over it to get the labels, but I only need the value
+            for the correct relation if I do log likelihood, BUT if I combine the instances, then I have multi-label
+            predictions and cannot use log likelihood, instead I could randomly drop instances of the same class
+
+            - triples (tensor of shape [n, n_i, 3], ),
+            - negative_samples (list of tensors of shape [n,num_samples]; 3 elements
+              in order S,P,O)
+            """
+
+            num_ones = defaultdict(int)
+            num_keys = defaultdict(int)
+            queries_batch = {}
+            query_type_indexes_batch = {}
+            label_coords_batch = {}
+
+            triples_batch = {}
+
+            for index in batch:
+                ig = self.igs[index]
+                for query_type_index, query_type in enumerate(self.query_types):
+                    num_keys[ig] += len(self.queries[query_type][ig])
+                    num_ones[ig] += len(self.labels[query_type][ig])
+
+                queries_batch[ig] = torch.zeros([num_keys[ig], 2], dtype=torch.long)
+                query_type_indexes_batch[ig] = torch.zeros([num_keys[ig]], dtype=torch.long)
+                label_coords_batch[ig] = torch.zeros([num_ones[ig], 2], dtype=torch.int)
+
+                triples_batch[ig] = torch.zeros([num_ones[ig], 3], dtype=torch.long)
+
+                for query_type_index, query_type in enumerate(self.query_types):
+                    if query_type == "sp_":
+                        query_col_1, query_col_2, target_col = S, P, O
+                    elif query_type == "s_o":
+                        query_col_1, target_col, query_col_2 = S, P, O
+                    else:
+                        target_col, query_col_1, query_col_2 = S, P, O
+
+                    current_index_queries = 0
+                    current_index_label_coords = 0
+                    queries = self.queries[query_type][ig]
+                    labels = self.labels[query_type][ig]
+                    label_offsets = self.label_offsets[query_type][ig]
+                    for example_index in range(len(queries)):
+                        query_type_indexes_batch[current_index_queries] = query_type_index
+                        start = label_offsets[example_index]
+                        end = label_offsets[example_index + 1]  # should not exist for last example?
+                        size = end - start
+                        queries_batch[ig][current_index_queries,] = queries[example_index]
+                        label_coords_batch[ig][
+                            current_index_label_coords: (current_index_label_coords + size), 0
+                        ] = current_index_queries
+                        label_coords_batch[ig][
+                            current_index_label_coords: (current_index_label_coords + size), 1
+                        ] = labels[start:end]
+
+                        triples_batch[ig][
+                            current_index_label_coords: (current_index_label_coords + size), query_col_1
+                        ] = queries[example_index][0]
+                        triples_batch[ig][
+                            current_index_label_coords: (current_index_label_coords + size), query_col_2
+                        ] = queries[example_index][1]
+                        triples_batch[ig][
+                            current_index_label_coords: (current_index_label_coords + size), target_col
+                        ] = labels[start:end]
+
+                        current_index_queries += 1
+                        current_index_label_coords += size
+
+
+
+            # all done
+            return {
+                "queries": queries_batch,
+                "label_coords": label_coords_batch,
+                "query_type_indexes": query_type_indexes_batch,
+                # "triples": triples_batch,
+            }
+
+        return collate
+
+    def _process_batch(self, batch_index: int, batch) -> "TrainingJob._ProcessBatchResult":
+        # calculate scores for all predicates for each possible subject-object combination
+        # recalculate to probabilities and select probabilities for correct coordinate
+        # calculate log likelihood (but how is log likelihood implemented in PyTorch?)
+
+        # So, as for KvsAll, all I need is coordinates from which I can build 3-way tensor, BUT the
+        # way that the scoring function works I do not need to build the 3-way tensor, but instead
+        # I can build the 2-way tensor of all s-o pairs and let it run for all relations
+
+        # ABOVE COMMENTS MIGHT BE HEAVILY OUTDATED
+
+        # prepare
+        prepare_time = -time.time()
+        queries_batch = batch["queries"]
+        batch_size = len(queries_batch)
+        label_coords_batch = batch["label_coords"]
+        query_type_indexes_batch = batch["query_type_indexes"]
+
+        loss_value_total = 0
+
+        backward_time = 0
+        forward_time = 0
+        prepare_time += time.time()
+        for ig in queries_batch:
+
+            prepare_time -= time.time()
+            examples_for_query_type = {}
+            for query_type_index, query_type in enumerate(self.query_types):
+                examples_for_query_type[query_type] = (
+                    (query_type_indexes_batch[ig] == query_type_index)
+                    .nonzero()
+                    .to(self.device)
+                    .view(-1)
+                )
+
+            ig_size = len(queries_batch[ig])
+
+            labels_batch = kge.job.util.coord_to_sparse_tensor(
+                ig_size,
+                max(self.dataset.num_entities(), self.dataset.num_relations()),
+                label_coords_batch[ig],
+                self.device
+            ).to_dense()
+
+            labels_for_query_type = {}
+            for query_type, examples in examples_for_query_type.items():
+                if query_type == "s_o":
+                    labels_for_query_type[query_type] = labels_batch[
+                                                            examples, : self.dataset.num_relations()
+                                                        ]
+                else:
+                    labels_for_query_type[query_type] = labels_batch[
+                        list(examples)
+                    ]
+                    labels_for_query_type[query_type] = labels_for_query_type[query_type][
+                        :, self.entities[ig]
+                    ]
+                    print(labels_for_query_type[query_type].size())
+                    """
+                    print(examples)
+                    print(len(examples))
+                    print(self.entities[ig])
+                    print(len(self.entities[ig]))
+                    print(labels_batch)
+                    print(labels_batch.size())
+                    labels_for_query_type[query_type] = labels_batch[
+                                                            list(examples), self.entities[ig]
+                                                        ]
+                    """
+
+            if self.label_smoothing > 0.0:
+                # as in ConvE: https://github.com/TimDettmers/ConvE
+                for query_type, labels in labels_for_query_type.items():
+                    if query_type != "s_o":  # entity targets only for now
+                        labels_for_query_type[query_type] = (1.0 - self.label_smoothing) * labels + 1.0 / labels.size(1)
+
+            prepare_time += time.time()
+
+            # forward/backward pass (sp)
+            # loss_value_ig = 0.0
+            for query_type, examples in examples_for_query_type.items():
+                if len(examples) > 0:
+                    forward_time -= time.time()
+                    if query_type == "sp_":
+                        scores = self.model.score_sp(
+                            queries_batch[ig][examples, 0], queries_batch[ig][examples, 1], torch.tensor(self.entities[ig])
+                        )
+                    elif query_type == "s_o":
+                        scores = self.model.score_so(
+                            queries_batch[ig][examples, 0], queries_batch[ig][examples, 1]
+                        )
+                    else:
+                        scores = self.model.score_po(
+                            queries_batch[ig][examples, 0], queries_batch[ig][examples, 1], torch.tensor(self.entities[ig])
+                        )
+                    loss_value = (
+                            self.loss(scores, labels_for_query_type[query_type]) / batch_size
+                    )
+                    loss_value_total += loss_value.item()
+                    forward_time += time.time()
+                    backward_time -= time.time()
+                    loss_value.backward()
+                    backward_time += time.time()
+
+        return TrainingJob._ProcessBatchResult(
+            loss_value_total, batch_size, prepare_time, forward_time, backward_time
         )

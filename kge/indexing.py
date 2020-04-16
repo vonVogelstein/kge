@@ -31,6 +31,19 @@ def instances_ig_level(dataset, split):
 
     dataset._indexes[f"{split}_instances_grouped_ig"] = ig_to_instances
 
+def classes_ig_level(dataset, split):
+    triples_ig = dataset.index(f"{split}_triples_class_grouped_ig")
+    classes_ig = defaultdict(set)
+
+    for ig, triples in triples_ig.items():
+        for triple in triples:
+            classes_ig[ig].add(triple[0].item())
+            classes_ig[ig].add(triple[2].item())
+
+        classes_ig[ig] = list(classes_ig[ig])
+
+    dataset._indexes[f"{split}_classes_per_ig"] = classes_ig
+
 
 def _group_by(keys, values) -> dict:
     """Group values by keys.
@@ -90,16 +103,42 @@ def index_KvsAll(dataset: "Dataset", split: str, key: str):
 
     name = split + "_" + key + "_to_" + value
     if not dataset._indexes.get(name):
-        # triples = dataset.split(split)
-        triples = dataset.split(f"{split}.global.triples")  # TODO: Definitely need to change this to something more reasonable
-        dataset._indexes[name] = _group_by(
-            triples[:, key_cols], triples[:, value_column]
-        )
+        task = dataset.config.get("job.task")
+        if task == "normal":
+            triples = dataset.split(split)
+        elif task == "ig_count":
+            triples = dataset.split(f"{split}.global.triples")
+        elif task == "ig_basic":
+            triples = dataset.index(f"{split}_triples_class_grouped_ig")
+        else:
+            raise ValueError()
 
-    dataset.config.log(
-        "{} distinct {} pairs in {}".format(len(dataset._indexes[name]), key, split),
-        prefix="  ",
-    )
+        if task in ["normal", "ig_count"]:
+            dataset._indexes[name] = _group_by(
+                triples[:, key_cols], triples[:, value_column]
+            )
+            num_dist_pairs = len(dataset._indexes[name])
+        elif task == "ig_basic":
+            dataset._indexes[name] = {}
+            num_dist_pairs = 0
+            # print("Checking KvsAll like indexed triples for 'ig_basic'")  # TODO: Remove once happy with output
+            for ig, triples_ig in triples.items():
+                dataset._indexes[name][ig] = _group_by(
+                    triples_ig[:, key_cols], triples_ig[:, value_column]
+                )
+                for dict_key, dict_value in dataset._indexes[name][ig].items():
+                    dict_value = torch.unique_consecutive(dict_value)
+                    dataset._indexes[name][ig][dict_key] = dict_value
+
+                # print(dataset._indexes[name][ig])
+                num_dist_pairs += len(dataset._indexes[name][ig])
+        else:
+            raise ValueError()
+
+        dataset.config.log(
+            "{} distinct {} pairs in {}".format(num_dist_pairs, key, split),
+            prefix="  ",
+        )  # TODO: Need to check if it is ok to only log when index is first created
 
     return dataset._indexes.get(name)
 
@@ -279,7 +318,7 @@ def create_default_index_functions(dataset: "Dataset"):
 
 
 def create_task_specific_index_functions(dataset: "Dataset"):
-    if dataset.config.get("job.task") == "ig_count":
+    if dataset.config.get("job.task") in ["ig_count", "ig_basic"]:
         dataset.index_functions["train_triples_to_counts"] = IndexWrapper(
             triples_to_counts, split="train"
         )
@@ -293,6 +332,11 @@ def create_task_specific_index_functions(dataset: "Dataset"):
         for split in ["train", "valid", "test"]:
             dataset.index_functions[f"{split}_instances_grouped_ig"] = IndexWrapper(
                 instances_ig_level, split=split
+            )
+
+        for split in ["train", "valid", "test"]:
+            dataset.index_functions[f"{split}_classes_per_ig"] = IndexWrapper(
+                classes_ig_level, split=split
             )
 
         # TODO: See if any more index functions are needed for ig_count (e.g. for evaluation)
