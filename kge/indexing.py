@@ -103,6 +103,18 @@ def index_KvsAll(dataset: "Dataset", split: str, key: str):
 
     name = split + "_" + key + "_to_" + value
     if not dataset._indexes.get(name):
+        if not dataset.config.get("job.ig_based"):
+            triples = dataset.split(split)
+        else:
+            if dataset.config.get("KvsAll.counts"):
+                triples = dataset.split(f"{split}.global.triples")
+                print(triples.size())
+                if not dataset.config.get("train_ig.use_unknown_relation"):
+                    triples = triples[
+                        (triples[:, 1] != dataset.id_unknown()).nonzero().view(-1)
+                    ]
+        # TODO: Add option for basic ig training job
+        """
         task = dataset.config.get("job.task")
         if task == "normal":
             triples = dataset.split(split)
@@ -112,7 +124,15 @@ def index_KvsAll(dataset: "Dataset", split: str, key: str):
             triples = dataset.index(f"{split}_triples_class_grouped_ig")
         else:
             raise ValueError()
+        """
 
+        dataset._indexes[name] = _group_by(
+            triples[:, key_cols], triples[:, value_column]
+        )
+        num_dist_pairs = len(dataset._indexes[name])
+
+
+        """
         if task in ["normal", "ig_count"]:
             dataset._indexes[name] = _group_by(
                 triples[:, key_cols], triples[:, value_column]
@@ -134,7 +154,7 @@ def index_KvsAll(dataset: "Dataset", split: str, key: str):
                 num_dist_pairs += len(dataset._indexes[name][ig])
         else:
             raise ValueError()
-
+        """
         dataset.config.log(
             "{} distinct {} pairs in {}".format(num_dist_pairs, key, split),
             prefix="  ",
@@ -315,6 +335,25 @@ def create_default_index_functions(dataset: "Dataset"):
         dataset.index_functions[f"{obj}_id_to_index"] = IndexWrapper(
             _invert_ids, obj=obj
         )
+
+    # index functions for IG datasets
+    dataset.index_functions["train_triples_to_counts"] = IndexWrapper(
+        triples_to_counts, split="train"
+    )
+
+    for split in ["train", "valid", "test"]:
+        for type_ in ["instance", "class"]:
+            dataset.index_functions[f"{split}_triples_{type_}_grouped_ig"] = IndexWrapper(
+                triples_ig_level, split=split, type_=type_
+            )
+
+            dataset.index_functions[f"{split}_instances_grouped_ig"] = IndexWrapper(
+                instances_ig_level, split=split
+            )
+
+            dataset.index_functions[f"{split}_classes_per_ig"] = IndexWrapper(
+                classes_ig_level, split=split
+            )
 
 
 def create_task_specific_index_functions(dataset: "Dataset"):

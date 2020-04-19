@@ -5,7 +5,10 @@ job:
   type: train
 
   # Main device to use for this job (e.g., 'cpu', 'cuda', 'cuda:0')
-  device: 'cuda'  
+  device: 'cuda'
+
+  # Set to true when underlying dataset is made up of many individual graphs
+  ig_based: False
 
 # The seeds of the PRNGs can be set manually for (increased) reproducability.
 # Use -1 to use default seed.
@@ -228,6 +231,10 @@ KvsAll:
     s_o: False
     _po: True
 
+  # If set to true uses counts of triples instead of binary labels for training, can
+  # only be used together with poisson loss
+  counts: False
+
 # Options for negative sampling training (train.type=="negative_sampling")
 negative_sampling:
   # Negative sampler to use
@@ -267,8 +274,13 @@ negative_sampling:
 
   # Whether to share the s/p/o corruptions for all triples in the batch. This
   # can make training more efficient. Cannot be used with together with
-  # filtering.
+  # filtering, but it is ensured that each triple does not get itself as a
+  # negative.
   shared: False
+
+  # Whether sampling should be performed with replacement. Without replacement
+  # sampling is currently only supported for shared sampling.
+  with_replacement: True
 
   # Implementation to use for the negative sampling job. Possible values are:
   # - triple: Scores every positive and negative triple in the batch
@@ -292,6 +304,15 @@ negative_sampling:
   # batch_size.
   chunk_size: -1                  # default: no chunking
 
+# Options for training on IG-based datasets
+train_ig:
+  # When set to true, trains on all explicitly annotated triples and
+  # additionally on triples of the form (sbj, unknown, obj) for all sbj-obj
+  # pairs which are not annotated, instead of training only on explicitly
+  # annotated triples
+  use_unknown_relation: True
+
+
 
 ## VALIDATION AND EVALUATION ###################################################
 
@@ -299,7 +320,7 @@ negative_sampling:
 # validation when training (unless overridden, see below). Right now, evaluation
 # jobs compute a fixed set of metrics: MRR, HITS@k.
 eval:
-  # Split used for evaluation (specified under 'dataset.files').  # TODO: Should this not say that filename etc. are specified under dataset.files?
+  # Split used for evaluation (specified under 'dataset.files').
   split: valid
 
   # Splits used to filter for filtered metrics. The split using for evaluation
@@ -346,6 +367,11 @@ eval:
 
   # Other options
   pin_memory: False
+
+# Evaluation options unique to
+predicate_det_class:
+  ks: [1, 10, 70]
+  Xs: [20, 50, 100]
 
 
 # Configuration options for model validation/selection during training. Applied

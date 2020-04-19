@@ -555,12 +555,9 @@ class TrainingJobKvsAll(TrainingJob):
         #' of that type in the list of all examples
         self.query_end_index = []
 
-        # TODO: Must search for more reasonable place for this in config, generally need to see
-        # TODO: how to handle the new "tasks" in the config file, also because many options
-        # TODO: are not available for these new tasks
-        self.task = self.config.get("job.task")
-        if self.task == "ig_count":
-            self.counts = self.dataset.index(f"{self.train_split}_triples_to_counts")  # self.train_split is just the word train
+        self.counts_enabled = self.config.get("KvsAll.counts")
+        if self.counts_enabled:
+            self.counts = self.dataset.index(f"{self.train_split}_triples_to_counts")
 
         # construct relevant data structures
         self.num_examples = 0
@@ -665,11 +662,10 @@ class TrainingJobKvsAll(TrainingJob):
 
                 current_index += size
 
-            if self.task == "ig_count":
+            if self.counts_enabled:
                 triples_batch_tuples = [tuple([pos.item() for pos in triple]) for triple in triples_batch]
                 label_coords_counts_batch = torch.tensor(
                     [int(self.counts[triple]) for triple in triples_batch_tuples], dtype=torch.int)
-                # print(label_coords_counts_batch)
             else:
                 label_coords_counts_batch = 1.0
 

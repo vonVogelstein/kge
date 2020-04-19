@@ -52,6 +52,13 @@ class Dataset(Configurable):
         except KeyError:
             self._num_relations: int = None
 
+        try:
+            self._id_unknown: int = config.get("dataset.id_unknown")
+            if self._id_unknown < 0:
+                self._id_unknown = None
+        except KeyError:
+            self._id_unknown: int = None
+
         #: split-name to (n,3) int32 tensor
         self._triples: Dict[str, Tensor] = {}
 
@@ -67,13 +74,13 @@ class Dataset(Configurable):
         self.index_functions: Dict[str, Callable] = {}
         create_default_index_functions(self)
 
-        create_task_specific_index_functions(self)
+        # create_task_specific_index_functions(self)  # TODO: remove once everything runs in default
 
 
     ## LOADING ##########################################################################
 
     @staticmethod
-    def load(config: Config, preload_data=False):  # TODO: change back to True once preloading is correct again
+    def load(config: Config, preload_data=True):
         """Loads a dataset.
 
         If preload_data is set, loads entity and relation maps as well as all splits.
@@ -87,13 +94,19 @@ class Dataset(Configurable):
             config.load(os.path.join(folder, "dataset.yaml"))
 
         dataset = Dataset(config, folder)
-        """
+
         if preload_data:
             dataset.entity_ids()
             dataset.relation_ids()
-            for split in ["train", "valid", "test"]:
-                dataset.split(split)
-        """
+            for split in ["train", "valid", "eval"]:
+                split_name = config.get(f"{split}.split")
+                if config.get("KvsAll.counts"):
+                    dataset.split(f"{split_name}.global.triples")
+                else:
+                    dataset.split(split_name)
+                # TODO: adjust to handle other options correctly once added
+                # TODO: e.g. basic IG based training
+
         return dataset
 
     @staticmethod
@@ -369,7 +382,17 @@ NOT RECOMMENDED: You can update the timestamp of all cached files using:
         "Return the number of relations in this dataset."
         if not self._num_relations:
             self._num_relations = len(self.relation_ids())
+            if self.config.get("job.ig_based") and not self.config.get("train_ig.use_unknown_relation"):
+                self._num_relations -= 1
         return self._num_relations
+
+    def id_unknown(self) -> int:
+        "Returns the id of the unknown relation in this dataset."
+        if not self._id_unknown:
+            self._id_unknown = self.relation_ids().index("unknown")
+
+        return self._id_unknown
+
 
     def split(self, split: str) -> Tensor:
         """Return the split of the specified name.

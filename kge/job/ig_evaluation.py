@@ -12,9 +12,12 @@ class IgEvaluationJob(EvaluationJob):
     """ Predicate classification and detection evaluation protocol """
 
     def __init__(self, config: Config, dataset: Dataset, parent_job, model):
-        # TODO: looks like this one needs no changes
         super().__init__(config, dataset, parent_job, model)
         self.is_prepared = False
+
+        self.ks = self.config.get("predicate_det_class.ks")
+        self.Xs = self.config.get("predicate_det_class.Xs")
+        self.max_k = max(self.ks)
 
         if self.__class__ == IgEvaluationJob:
             for f in Job.job_created_hooks:
@@ -26,14 +29,11 @@ class IgEvaluationJob(EvaluationJob):
         if self.is_prepared:
             return
 
-        # f"{self.config.get('eval.split')}.global.triples" <-- probably need this later on
-
-        self.triples_instance = self.dataset.index(f"{self.eval_split}_triples_instance_grouped_ig")
         self.triples_class = self.dataset.index(f"{self.eval_split}_triples_class_grouped_ig")
 
         # and data loader
         self.loader = torch.utils.data.DataLoader(
-            range(len(self.triples_instance)),  # TODO: See if this works well, could also be something else
+            range(len(self.triples_class)),
             collate_fn=self._collate,
             shuffle=False,
             batch_size=self.batch_size,
@@ -48,14 +48,11 @@ class IgEvaluationJob(EvaluationJob):
     def _collate(self, batch):
         """Looks up true triples for each IG in the batch"""  # Not really what I am planning to do here..
         triples_class = []
-        triples_instance = []
         for example_index in batch:
             triples_class.append(self.triples_class[str(example_index)])  # TODO: problem comes from map working on strings despite ints being the better choice
-            triples_instance.append(self.triples_instance[str(example_index)])
 
         return {
             "triples_class": triples_class,
-            "triples_instance": triples_instance,
             "example_indexes": batch
         }
 
@@ -71,21 +68,14 @@ class IgEvaluationJob(EvaluationJob):
             + " data (epoch {})...".format(self.epoch)
         )
 
-        # TODO: No need to do any filtering stuff, but could make options for also doing detection
-        # TODO: Not sure about that histogram stuff, maybe I need something similar
-
         S, P, O = 0, 1, 2
-        # k = 10
-        ks = [1, 10, 30]
 
-        # TODO: Put some way of keeping track of correct predictions
         correct_triples = {}
         correct_triples_detection = {}
 
-        for k in ks:
+        for k in self.ks:
             correct_triples[k] = defaultdict(int)
             correct_triples_detection[k] = defaultdict(int)
-        # correct_triples = defaultdict(int)
         total_triples = 0
 
         # let's go
@@ -96,31 +86,30 @@ class IgEvaluationJob(EvaluationJob):
         sorting_etc_time = 0
         finding_time = 0
 
-        # device_printed = False
+        columns = torch.arange(self.dataset.num_relations())
+        columns_no_unknown = columns[columns != self.dataset.id_unknown()]
 
         # indexes_to_be_viewed = [18, 35, 78]
         for batch_index, batch in enumerate(self.loader):
             triples_class_batch = batch["triples_class"]
-            triples_instance_batch = batch["triples_instance"]
             example_indexes = batch["example_indexes"]
 
             # TODO: Not sure if I need different ways of transforming to probabilities between
             # TODO: count and IG training
 
             # Iterate over IGs
-            for triples_class, triples_instance, example_index in zip(triples_class_batch, triples_instance_batch, example_indexes):
+            for triples_class, example_index in zip(triples_class_batch, example_indexes):
                 # TODO: Probably need to move these tensors (e.g. triples_class) to device, but I could also just use a tensor instead of a list when creating the batch
                 """
                 if example_index in indexes_to_be_viewed:
                     print("Look here:")
-                    print(f"Example Numer: {example_index}")
+                    print(f"Example Number: {example_index}")
                     print("Triples classes:")
                     print(triples_class)
                     print("Triples instances:")
                     print(triples_instance)
                 """
                 triples_class = triples_class.to(self.device)
-                triples_instance = triples_instance.to(self.device)
                 score_time -= time.time()
                 scores = self.model.score_so(triples_class[:, S], triples_class[:, O])
                 """
@@ -134,7 +123,7 @@ class IgEvaluationJob(EvaluationJob):
 
                 probabilities = probabilities.to("cpu")
 
-                indices_no_unknown = (triples_class[:, P] != (self.dataset.num_relations() - 1)).nonzero().view(-1)
+
 
                 # probabilities_no_unknown = probabilities[indices_no_unknown]
                 """
@@ -144,13 +133,30 @@ class IgEvaluationJob(EvaluationJob):
                     for elem in probabilities:
                         print(elem)
                 """
+                indices_no_unknown = (triples_class[:, P] != (self.dataset.id_unknown())).nonzero().view(-1)
+                if self.config.get("train_ig.use_unknown_relation"):
+                    probabilities = probabilities[:, columns_no_unknown]
+
                 max_probabilities, max_indices = torch.topk(
-                    probabilities[:, :self.dataset.num_relations() - 1], max(ks), dim=1
+                    probabilities, self.max_k, dim=1
                 )
 
-                # max_probabilities_no_unknown, max_indices_no_unknown = torch.topk(
-                #     probabilities_no_unknown[:, :self.dataset.num_relations() - 1], max(ks), dim=1
+
+                # max_probabilities, max_indices = torch.topk(
+                #     probabilities[:, :self.dataset.num_relations() - 1], self.max_k, dim=1
                 # )
+                """
+                if self.config.get("train_ig.use_unknown_relation"):
+                    indices_no_unknown = (triples_class[:, P] != (self.dataset.id_unknown())).nonzero().view(-1)
+                    max_probabilities, max_indices = torch.topk(
+                        probabilities[:, :self.dataset.num_relations() - 1], self.max_k, dim=1
+                    )
+                else:
+                    indices_no_unknown = (triples_class[:, P] != (self.dataset.num_relations())).nonzero().view(-1)
+                    max_probabilities, max_indices = torch.topk(
+                        probabilities[:, :self.dataset.num_relations()], self.max_k, dim=1
+                    )
+                """
 
                 """
                 if example_index in indexes_to_be_viewed:
@@ -161,7 +167,7 @@ class IgEvaluationJob(EvaluationJob):
 
                 # max_indices = max_indices.type(torch.IntTensor)
                 true_predicates = triples_class[:, P].reshape(-1, 1).to("cpu")
-                true_predicates = true_predicates.repeat(1, max(ks))
+                true_predicates = true_predicates.repeat(1, self.max_k)
 
 
 
@@ -201,7 +207,7 @@ class IgEvaluationJob(EvaluationJob):
                 """
 
                 loop_time -= time.time()
-                for k in ks:
+                for k in self.ks:
                     sorting_etc_time -= time.time()
                     max_probabilities_k = max_probabilities[:, :k].transpose(dim0=1, dim1=0).reshape(-1)
                     sorted_indices = torch.sort(max_probabilities_k, dim=0, descending=True)[1]
@@ -210,7 +216,7 @@ class IgEvaluationJob(EvaluationJob):
                     sorting_etc_time += time.time()
                     finding_time -= time.time()
                     for index in true_predictions_indexes:
-                        if index >= (k * len(triples_instance)):
+                        if index >= (k * len(triples_class)):
                             break
                         rank = (sorted_indices == index).nonzero().item()
                         correct_triples[k][rank] += 1
@@ -224,27 +230,6 @@ class IgEvaluationJob(EvaluationJob):
                     finding_time += time.time()
 
                 loop_time += time.time()
-                """
-                if example_index in indexes_to_be_viewed:
-                    print("flattened max probabilities")
-                    print(max_probabilities)
-                    print("sorted predictions")
-                    print(sorted_indices)
-                """
-                """
-                loop_time -= time.time()
-                for index in true_predictions_indexes:
-                    rank = (sorted_indices == index).nonzero().item()
-                    if example_index in indexes_to_be_viewed:
-                        print("rank of correct prediction")
-                        print(rank)
-                    correct_triples[rank] += 1
-                loop_time += time.time()
-                """
-                # triples_class_no_unknown = triples_class[
-                #     (triples_class[:, P] != (self.dataset.num_relations() - 1)).nonzero().view(-1)
-                # ]
-                # total_triples += triples_class_no_unknown.size(0)
                 total_triples += len(indices_no_unknown)
 
                 if self.trace_examples:
@@ -258,7 +243,7 @@ class IgEvaluationJob(EvaluationJob):
         metrics = {}
 
         metrics_calculation_time = -time.time()
-        for k in ks:
+        for k in self.ks:
             correct_triples_cum = torch.zeros(100)
             correct_triples_detection_cum = torch.zeros(100)
             correct_triples_cum[0] = correct_triples[k][0]
@@ -267,7 +252,7 @@ class IgEvaluationJob(EvaluationJob):
                 correct_triples_cum[i] = correct_triples[k][i] + correct_triples_cum[i - 1]
                 correct_triples_detection_cum[i] = correct_triples_detection[k][i] + correct_triples_detection_cum[i - 1]
 
-            for at_x in [20, 50, 100]:
+            for at_x in self.Xs:
                 metrics[f"predicate_classification_recall_at_{at_x}_k={k}"] = \
                     (correct_triples_cum[at_x - 1] / total_triples).item()
                 metrics[f"predicate_detection_recall_at_{at_x}_k={k}"] = \
@@ -275,13 +260,6 @@ class IgEvaluationJob(EvaluationJob):
 
         metrics_calculation_time += time.time()
 
-        """
-        print("\nCorrect triples count")
-        for i in range(0, 100, 5):
-            print(f"{correct_triples[i]}\t{correct_triples_cum[i]}")
-
-        print(f"total triples: {total_triples}")
-        """
         total_time += time.time()
 
 
@@ -310,7 +288,7 @@ class IgEvaluationJob(EvaluationJob):
             # filter_splits=self.filter_splits,
             epoch=self.epoch,
             batches=len(self.loader),
-            size=len(self.triples_instance),
+            size=len(self.triples_class),
             epoch_time=epoch_time,
             event="eval_completed",
             **metrics,
@@ -339,32 +317,3 @@ class IgEvaluationJob(EvaluationJob):
             f(self, trace_entry)
 
         return trace_entry
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
