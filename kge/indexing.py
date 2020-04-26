@@ -4,22 +4,43 @@ import numba
 import numpy as np
 
 
-def triples_to_counts(dataset, split):
+def global_triples_to_counts(dataset, split):
+    """Return an index for the triples in split (''train'', ''valid'',
+    ''test'') to their respective global counts.
+
+    The index maps from `tuple` to `int`.
+
+    The index is cached in the provided dataset under name
+    `{split}_global_triples_to_counts`. If this index is
+    already present, does not recompute it.
+
+    """
     triples = dataset.split(f"{split}.global.triples")
-    triple_index_count_map = dataset.load_map(f"{split}.global.counts", as_list=True)
-    triple_tuple_list = [tuple([pos.item() for pos in triple]) for triple in triples]
-    triple_count_map = dict(zip(triple_tuple_list, triple_index_count_map))
+    id_count_map = dataset.load_map(f"{split}.global.counts", as_list=True)
+    id_count_map = list(map(int, id_count_map))
+    triple_tuples = [tuple([pos.item() for pos in triple]) for triple in triples]
+    triple_count_map = dict(zip(triple_tuples, id_count_map))
 
-    dataset._indexes[f"{split}_triples_to_counts"] = triple_count_map
+    dataset._indexes[f"{split}_global_triples_to_counts"] = triple_count_map
 
 
-def triples_ig_level(dataset, split, type_):
-    triples = dataset.split(f"{split}.ig.triples_{type_}")
+def triples_to_igs(dataset, split, triple_type):
+    """Return an index for the IGs in split (''train'', ''valid'',
+    ''test'') to their respective triples.
+
+    The index maps from `int` to `torch.LongTensor`.
+
+    The index is cached in the provided dataset under name
+    `{split}_triples_{triple_type}_grouped_ig`. If this index is
+    already present, does not recompute it.
+
+    """
+    triples = dataset.split(f"{split}.ig.triples_{triple_type}")
     triples_to_igs = dataset.load_map(f"{split}.ig.triples_to_igs", as_list=True)
 
     ig_to_triples = _group_by(triples_to_igs, triples)
 
-    dataset._indexes[f"{split}_triples_{type_}_grouped_ig"] = ig_to_triples
+    dataset._indexes[f"{split}_triples_{triple_type}_grouped_ig"] = ig_to_triples
 
 
 def instances_ig_level(dataset, split):
@@ -30,6 +51,7 @@ def instances_ig_level(dataset, split):
     )
 
     dataset._indexes[f"{split}_instances_grouped_ig"] = ig_to_instances
+
 
 def classes_ig_level(dataset, split):
     triples_ig = dataset.index(f"{split}_triples_class_grouped_ig")
@@ -48,26 +70,28 @@ def classes_ig_level(dataset, split):
 def _group_by(keys, values) -> dict:
     """Group values by keys.
 
-    :param keys: list of keys  # TODO: This cannot even be a list as of original code
-    :param values: list of values
+    :param keys: iterable of keys
+    :param values: iterable of values (of type int)
     A key value pair i is defined by (key_list[i], value_list[i]).
     :return: OrderedDict where key value pairs have been grouped by key.
 
-     """
-    if not isinstance(keys, list):
+    """
+    from collections import Iterable
+
+    if isinstance(keys, torch.Tensor):
         keys = keys.tolist()
-    if not isinstance(values, list):
+    if isinstance(values, torch.Tensor):
         values = values.tolist()
 
     result = defaultdict(list)
     for key, value in zip(keys, values):
-        if isinstance(key, str):  # covers all cases coming from maps where key does not have to/ cannot be made into tuple
-            result[key].append(value)
-        else:
+        if isinstance(key, Iterable) and not isinstance(key, str):
             result[tuple(key)].append(value)
+        else:
+            result[key].append(value)
 
     for key, value in result.items():
-        if isinstance(value[0], str):  # needed for grouping of maps
+        if isinstance(value[0], str):
             value = [int(elem) for elem in value]
         result[key] = torch.IntTensor(sorted(value))
     return OrderedDict(result)
@@ -108,7 +132,6 @@ def index_KvsAll(dataset: "Dataset", split: str, key: str):
         else:
             if dataset.config.get("KvsAll.counts"):
                 triples = dataset.split(f"{split}.global.triples")
-                print(triples.size())
                 if not dataset.config.get("train_ig.use_unknown_relation"):
                     triples = triples[
                         (triples[:, 1] != dataset.id_unknown()).nonzero().view(-1)
@@ -158,7 +181,7 @@ def index_KvsAll(dataset: "Dataset", split: str, key: str):
         dataset.config.log(
             "{} distinct {} pairs in {}".format(num_dist_pairs, key, split),
             prefix="  ",
-        )  # TODO: Need to check if it is ok to only log when index is first created
+        )
 
     return dataset._indexes.get(name)
 
@@ -338,7 +361,7 @@ def create_default_index_functions(dataset: "Dataset"):
 
     # index functions for IG datasets
     dataset.index_functions["train_triples_to_counts"] = IndexWrapper(
-        triples_to_counts, split="train"
+        global_triples_to_counts, split="train"
     )
 
     for split in ["train", "valid", "test"]:
@@ -359,7 +382,7 @@ def create_default_index_functions(dataset: "Dataset"):
 def create_task_specific_index_functions(dataset: "Dataset"):
     if dataset.config.get("job.task") in ["ig_count", "ig_basic"]:
         dataset.index_functions["train_triples_to_counts"] = IndexWrapper(
-            triples_to_counts, split="train"
+            global_triples_to_counts, split="train"
         )
 
         for split in ["train", "valid", "test"]:

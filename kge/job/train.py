@@ -663,9 +663,14 @@ class TrainingJobKvsAll(TrainingJob):
                 current_index += size
 
             if self.counts_enabled:
-                triples_batch_tuples = [tuple([pos.item() for pos in triple]) for triple in triples_batch]
+                triples_batch_tuples = [
+                    tuple([pos.item() for pos in triple]) for triple in triples_batch
+                ]
                 label_coords_counts_batch = torch.tensor(
-                    [int(self.counts[triple]) for triple in triples_batch_tuples], dtype=torch.int)
+                    [self.counts[triple]
+                     for triple in triples_batch_tuples
+                     ], dtype=torch.int
+                )
             else:
                 label_coords_counts_batch = 1.0
 
